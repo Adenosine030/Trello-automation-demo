@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# healthcheck.sh - simple server health monitor
+# Usage: ./healthcheck.sh
+
+# Config
+LOGFILE="/var/log/healthcheck.log"
+THRESHOLD_CPU=85          # percent
+THRESHOLD_MEM=85          # percent used
+THRESHOLD_DISK=85         # percent used for root
+SLACK_WEBHOOK_URL=""      # optional: paste your Slack incoming webhook here
+
+timestamp() { date +"%d-%m-%Y %H:%M:%S"; }
+
+# Get metrics
+CPU_IDLE=$(top -bn1 | grep "Cpu(s)" | awk '{print $8}' | cut -d'.' -f1)
+CPU_USAGE=$((100 - CPU_IDLE))
+MEM_USED=$(free | awk '/Mem/ {printf("%d", $3/$2 * 100)}')
+DISK_USED=$(df -h / | awk 'NR==2 {gsub("%",""); print $5}')
+
+# Compose message
+MSG="$(timestamp) | CPU=${CPU_USAGE}% MEM=${MEM_USED}% DISK=${DISK_USED}%"
+
+# Log
+echo "$MSG" >> "$LOGFILE"
+
+# Alerts
+alert() {
+  local text="$1"
+  echo "$(timestamp) ALERT: $text" >> "$LOGFILE"
+  # Slack notify (optional)
+  if [ -n "$SLACK_WEBHOOK_URL" ]; then
+    curl -s -X POST -H 'Content-type: application/json' \
+      --data "{\"text\":\"$text\"}" "$SLACK_WEBHOOK_URL" >/dev/null 2>&1
+  fi
+}
+
+if [ "$CPU_USAGE" -ge "$THRESHOLD_CPU" ]; then
+  alert "High CPU usage: ${CPU_USAGE}%"
+fi
+
+if [ "$MEM_USED" -ge "$THRESHOLD_MEM" ]; then
+  alert "High Memory usage: ${MEM_USED}%"
+fi
+
+if [ "$DISK_USED" -ge "$THRESHOLD_DISK" ]; then
+  alert "Low Disk space: ${DISK_USED}% used"
+fi
+
+# Optionally print summary for manual runs
+echo "$MSG"
